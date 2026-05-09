@@ -13,9 +13,11 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 client = stoat.Client()
 
+# Stocke les failles déjà envoyées (reset si redémarrage)
 seen = set()
 
 API_URL = "https://api.osv.dev/v1/query"
+
 
 async def check_linux_vulns():
     await client.wait_until_ready()
@@ -28,48 +30,49 @@ async def check_linux_vulns():
                 "query": "linux kernel"
             }
 
-            response = requests.post(API_URL, json=payload)
+            response = requests.post(API_URL, json=payload, timeout=10)
             data = response.json()
 
             vulns = data.get("vulns", [])
 
-            for vuln in vulns[:5]:
-                vuln_id = vuln["id"]
+            for vuln in vulns[:10]:
+                vuln_id = vuln.get("id")
 
-                if vuln_id not in seen:
-                    seen.add(vuln_id)
+                if not vuln_id or vuln_id in seen:
+                    continue
 
-                    summary = vuln.get(
-                        "summary",
-                        "Pas de résumé disponible"
-                    )
+                seen.add(vuln_id)
 
-                    severity = "Inconnue"
+                summary = vuln.get("summary", "Pas de résumé disponible")
 
-                    if "severity" in vuln:
-                        severity = vuln["severity"][0].get(
-                            "score",
-                            "Inconnue"
-                        )
+                # Sévérité si dispo
+                severity = "Inconnue"
+                try:
+                    severity = vuln["severity"][0].get("score", "Inconnue")
+                except Exception:
+                    pass
 
-                    message = (
-                        f"🚨 Nouvelle faille Linux détectée\n\n"
-                        f"🔹 ID : {vuln_id}\n"
-                        f"🔹 Sévérité : {severity}\n"
-                        f"🔹 Résumé : {summary}"
-                    )
+                message = (
+                    "🚨 **Nouvelle faille Linux détectée**\n\n"
+                    f"🆔 ID : {vuln_id}\n"
+                    f"⚠️ Sévérité : {severity}\n"
+                    f"📄 Résumé : {summary}"
+                )
 
-                    await channel.send(message)
+                await channel.send(message)
 
         except Exception as e:
-            print(f"Erreur : {e}")
+            print(f"[Erreur API] {e}")
 
-        # Attend 5 minutes
-        await asyncio.sleep(300)
+        await asyncio.sleep(300)  # 5 minutes
+
 
 @client.on(stoat.ReadyEvent)
 async def ready(event):
-    print("✅ Bot connecté")
-    client.loop.create_task(check_linux_vulns())
+    print("✅ Bot Stoat connecté")
+
+    # IMPORTANT : nouvelle méthode compatible asyncio
+    asyncio.create_task(check_linux_vulns())
+
 
 client.run(TOKEN)
